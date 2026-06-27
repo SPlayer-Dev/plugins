@@ -1,0 +1,9 @@
+{
+  "name": "splayer-plugins",
+  "private": true,
+  "description": "SPlayer 插件市场",
+  "scripts": {
+    "validate": "node scripts/validate.mjs",
+    "build": "node scripts/build-registry.mjs"
+  }
+}

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 插件开发文档
+    url: https://splayer-next.imsyy.top/plugins/
+    about: 编写插件前请先阅读

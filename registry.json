@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "count": 1,
+  "plugins": [
+    {
+      "id": "imsyy.classisland",
+      "name": "ClassIsland 联动",
+      "author": "imsyy",
+      "type": "control",
+      "version": "1.0.0",
+      "description": "把当前歌词推送到 ClassIsland 主界面",
+      "homepage": "https://github.com/imsyy/SPlayer",
+      "updateUrl": "https://raw.githubusercontent.com/imsyy/splayer-plugins/main/plugins/imsyy.classisland.js"
+    }
+  ]
+}
