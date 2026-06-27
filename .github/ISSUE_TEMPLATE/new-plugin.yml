@@ -1,0 +1,36 @@
+name: 新建插件
+description: 提交一个新插件
+title: "[新建] "
+labels: ["投稿"]
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请阅读插件开发文档 https://splayer-next.imsyy.top/plugins/
+  - type: input
+    id: plugin-id
+    attributes:
+      label: 插件 @id
+      description: 与脚本头部 @id 一致，全局唯一，上架后不可更改
+      placeholder: 作者.插件名
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: 脚本
+      description: 把 .js 拖到此处上传，或粘贴脚本 raw 直链
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: 说明
+    validations:
+      required: false
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: 确认
+      options:
+        - label: 我对脚本内容与合法性负责
+          required: true

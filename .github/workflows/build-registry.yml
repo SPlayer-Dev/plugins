@@ -1,0 +1,38 @@
+name: build-registry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/**"
+      - "scripts/build-registry.mjs"
+      - "scripts/header.mjs"
+
+concurrency:
+  group: build-registry
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: REPO_RAW=https://raw.githubusercontent.com/${{ github.repository }}/main node scripts/build-registry.mjs
+      # 发布到 registry 分支：始终基于 main 当前全量插件重建，App 拉该分支的 registry.json
+      - run: |
+          cp registry.json "$RUNNER_TEMP/registry.json"
+          git checkout -- .
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git switch --orphan registry-build
+          cp "$RUNNER_TEMP/registry.json" registry.json
+          git add registry.json
+          git commit -m 'build: 重建 registry.json'
+          git push -f origin registry-build:registry

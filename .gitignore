@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+# 由 CI 重建并发布到 registry 分支，不在 main 跟踪
+registry.json

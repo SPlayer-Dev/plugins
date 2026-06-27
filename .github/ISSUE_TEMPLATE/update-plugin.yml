@@ -1,0 +1,36 @@
+name: 更新插件
+description: 更新一个已上架的插件
+title: "[更新] "
+labels: ["投稿"]
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请先提高脚本头部的 @version。
+  - type: input
+    id: plugin-id
+    attributes:
+      label: 插件 @id
+      description: 与已上架插件一致，保持不变
+      placeholder: 作者.插件名
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: 脚本
+      description: 把新版 .js 拖到此处上传，或粘贴脚本 raw 直链
+    validations:
+      required: true
+  - type: textarea
+    id: changelog
+    attributes:
+      label: 更新说明
+    validations:
+      required: false
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: 确认
+      options:
+        - label: 我已提高 @version，且对脚本内容负责
+          required: true

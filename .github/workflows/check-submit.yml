@@ -1,0 +1,33 @@
+name: check-submit
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: submit-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-submission:
+    # 所有 issue 都视为投稿（已禁用空白 issue）；issue 下 /recheck 可手动复检
+    if: |
+      github.event_name == 'issues' ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/recheck'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/intake.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
