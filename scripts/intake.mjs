@@ -17,6 +17,8 @@ const issue = event.issue;
 
 if (!issue) process.exit(0);
 
+const at = issue.user?.login ? `@${issue.user.login} ` : "";
+
 async function gh(method, path, payload) {
   return fetch(`${api}${path}`, {
     method,
@@ -41,7 +43,8 @@ const source_url = urls.find((u) =>
 );
 
 if (!source_url) {
-  await comment("⚠️ 未找到脚本。请把 `.js` 拖进文本框上传，或粘贴脚本 raw 直链，然后编辑本 issue 重新校验。");
+  await setStatus(false);
+  await comment(`${at}⚠️ 未找到脚本。请把 \`.js\` 拖进文本框上传，或粘贴脚本 raw 直链，然后编辑本 issue 重新校验。`);
   process.exit(0);
 }
 
@@ -52,14 +55,15 @@ try {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   source = await res.text();
 } catch (err) {
-  await comment(`❌ 拉取脚本失败：${err.message}`);
+  await setStatus(false);
+  await comment(`${at}❌ 拉取脚本失败：${err.message}`);
   process.exit(0);
 }
 
 const { id, header, errors } = validateSource(source);
 if (errors.length) {
   await setStatus(false);
-  await comment("❌ 校验未通过：\n" + errors.map((e) => `- ${e}`).join("\n") + "\n\n修正后编辑本 issue 重新校验。");
+  await comment(`${at}❌ 校验未通过：\n` + errors.map((e) => `- ${e}`).join("\n") + "\n\n修正后编辑本 issue 重新校验。");
   process.exit(0);
 }
 
@@ -114,5 +118,5 @@ if (pr?.number) {
 await setStatus(true);
 
 const note = is_update ? `更新 v${old_version} → v${version}` : "新插件";
-await comment(`✅ 校验通过，${note}，已提交 PR 待维护者审查：${pr?.html_url ?? "PR 创建失败"}`);
+await comment(`${at}✅ 校验通过，${note}，已提交 PR 待维护者审查：${pr?.html_url ?? "PR 创建失败"}`);
 console.log("done", id, pr?.html_url);
