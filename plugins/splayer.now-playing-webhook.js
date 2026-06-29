@@ -4,6 +4,7 @@
  * @version     1.0.0
  * @author      SPlayer
  * @type        control
+ * @grant       network
  * @apiLevel    2
  * @description 切歌时把当前播放信息推送到 Webhook，支持 Discord 与通用 JSON。
  * @homepage    https://github.com/SPlayer-Dev/plugins
