@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "count": 3,
+  "plugins": [
+    {
+      "id": "splayer.now-playing-webhook",
+      "name": "Now Playing 推送",
+      "author": "SPlayer",
+      "type": "control",
+      "version": "1.0.1",
+      "description": "切歌时把当前播放信息推送到 Webhook，支持 Discord 与通用 JSON。",
+      "homepage": "https://github.com/SPlayer-Dev/plugins",
+      "updateUrl": "https://raw.githubusercontent.com/SPlayer-Dev/plugins/main/plugins/splayer.now-playing-webhook.js"
+    },
+    {
+      "id": "winddrift.asus-keyboard-light",
+      "name": "ASUS 键盘背光联动",
+      "author": "WindDrift",
+      "type": "control",
+      "version": "1.0.0",
+      "description": "监听当前播放曲目封面变化，通过本地桥接服务将封面主题色应用到华硕键盘背光",
+      "homepage": "https://github.com/WindDrift/SPlayer-ASUS-Keyboard-Light-Controller",
+      "updateUrl": "https://raw.githubusercontent.com/SPlayer-Dev/plugins/main/plugins/winddrift.asus-keyboard-light.js"
+    },
+    {
+      "id": "winddrift.splayerlrc-classisland",
+      "name": "ClassIsland 联动",
+      "author": "imsyy & WindDrift",
+      "type": "control",
+      "version": "1.0.3",
+      "description": "把当前歌词推送到 ClassIsland 主界面",
+      "homepage": "https://github.com/WindDrift/SPlayerLRC-In-ClassIsland",
+      "updateUrl": "https://raw.githubusercontent.com/SPlayer-Dev/plugins/main/plugins/winddrift.splayerlrc-classisland.js"
+    }
+  ]
+}
