@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { parseHeader, validateSource } from "./header.mjs";
+import { parseHeader, validateSource, isNewerVersion } from "./header.mjs";
 
 const token = process.env.GITHUB_TOKEN;
 const repo = process.env.GITHUB_REPOSITORY;
@@ -70,8 +70,17 @@ if (errors.length) {
 // 查重
 const file = `plugins/${id}.js`;
 const is_update = existsSync(file);
-const old_version = is_update ? (parseHeader(readFileSync(file, "utf-8")).version ?? "?") : null;
+const old_version = is_update ? (parseHeader(readFileSync(file, "utf-8")).version ?? "0.0.0") : null;
 const version = header.version ?? "0.0.0";
+
+// 更新必须是严格递增的版本，杜绝同版本/降级盲覆盖（历史版本仍留在 git 提交记录里）
+if (is_update && !isNewerVersion(version, old_version)) {
+  await setStatus(false);
+  await comment(
+    `${at}❌ 更新被拒：新版本 v${version} 必须高于现版本 v${old_version}。请提高 @version 后编辑本 issue 重新校验。`,
+  );
+  process.exit(0);
+}
 
 // 仅把插件写进 PR；registry.json 由合并后的 build-registry 从 main 重建（避免并发丢条目）
 writeFileSync(file, source);

@@ -7,6 +7,7 @@
 /** 各字段长度上限 */
 export const LIMITS = {
   id: 64,
+  grant: 64,
   name: 24,
   description: 256,
   author: 56,
@@ -46,10 +47,26 @@ export function validateSource(source) {
   if (!header.id) errors.push("缺少 @id");
   else if (!ID_RE.test(header.id)) errors.push(`@id 非法：${header.id}`);
   if (!header.name) errors.push("缺少 @name");
-  if ((header.type ?? "source") !== "control") errors.push("@type 需声明为 control");
+  if ((header.type ?? "source") !== "control") errors.push("脚本头需声明 @type control");
   else if (!header.apiLevel || Number(header.apiLevel) < 2) errors.push("控制类插件需 @apiLevel ≥ 2");
   if (header.version && !/^\d+(\.\d+)*$/.test(header.version))
     errors.push(`@version 非法：${header.version}`);
+  // 权限：声明的 @grant 必须在白名单内；用到 request / 反向控制却没声明对应权限会在 App 端被拒，提前拦
+  const grants = (header.grant ?? "")
+    .split(/[,\s]+/)
+    .map((g) => g.trim().toLowerCase())
+    .filter(Boolean);
+  for (const g of grants) {
+    if (g !== "network" && g !== "control")
+      errors.push(`未知权限 @grant：${g}（仅支持 network / control）`);
+  }
+  if (/\bsplayer\.request\b/.test(source) && !grants.includes("network"))
+    errors.push("脚本用到 splayer.request，需声明 @grant network");
+  if (
+    /\bsplayer\.player\.(play|pause|next|prev|seek|setVolume|getPosition)\b/.test(source) &&
+    !grants.includes("control")
+  )
+    errors.push("脚本用到 splayer.player.* 反向控制，需声明 @grant control");
   return { id: header.id, header, errors };
 }
 
@@ -62,6 +79,28 @@ export function validate(id, source) {
   const result = validateSource(source);
   if (result.id && result.id !== id) result.errors.push(`@id（${result.id}）与文件名（${id}）不一致`);
   return result;
+}
+
+/**
+ * remote 版本是否严格高于 current：点分数字逐段比较，缺省段补 0，非数字段当 0
+ * @param remote - 新版本号
+ * @param current - 现版本号
+ */
+export function isNewerVersion(remote, current) {
+  const parse = (v) =>
+    String(v)
+      .trim()
+      .replace(/^v/i, "")
+      .split(/[.+-]/)
+      .map((seg) => Number(seg) || 0);
+  const a = parse(remote);
+  const b = parse(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return false;
 }
 
 /** 仅供人工注意的敏感用法（沙箱才是真边界，这里只提示不拦截） */
