@@ -1,7 +1,7 @@
 /**
  * @name        Now Playing 推送
  * @id          splayer.now-playing-webhook
- * @version     1.0.0
+ * @version     1.0.1
  * @author      SPlayer
  * @type        control
  * @grant       network
@@ -9,7 +9,7 @@
  * @description 切歌时把当前播放信息推送到 Webhook，支持 Discord 与通用 JSON。
  * @homepage    https://github.com/SPlayer-Dev/plugins
  * @updateUrl   https://raw.githubusercontent.com/SPlayer-Dev/plugins/main/plugins/splayer.now-playing-webhook.js
- * @changelog   首个版本：切歌推送，支持 Discord / 通用 JSON、自定义模板。
+ * @changelog   声明 @grant network，适配新权限系统（控制插件联网需显式授权）。
  */
 
 splayer.register({
