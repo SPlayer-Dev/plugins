@@ -14,6 +14,16 @@ body:
       placeholder: 作者.插件名
     validations:
       required: true
+  - type: dropdown
+    id: plugin-type
+    attributes:
+      label: 插件 @type
+      description: 与脚本头部 @type 一致
+      options:
+        - source
+        - control
+    validations:
+      required: true
   - type: textarea
     id: source
     attributes:

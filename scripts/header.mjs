@@ -47,8 +47,11 @@ export function validateSource(source) {
   if (!header.id) errors.push("缺少 @id");
   else if (!ID_RE.test(header.id)) errors.push(`@id 非法：${header.id}`);
   if (!header.name) errors.push("缺少 @name");
-  if ((header.type ?? "source") !== "control") errors.push("脚本头需声明 @type control");
-  else if (!header.apiLevel || Number(header.apiLevel) < 2) errors.push("控制类插件需 @apiLevel ≥ 2");
+  const type = header.type ?? "source";
+  if (type !== "source" && type !== "control")
+    errors.push(`@type 非法：${type}（仅支持 source / control）`);
+  else if (type === "control" && (!header.apiLevel || Number(header.apiLevel) < 2))
+    errors.push("控制类插件需 @apiLevel ≥ 2");
   if (header.version && !/^\d+(\.\d+)*$/.test(header.version))
     errors.push(`@version 非法：${header.version}`);
   // 权限：声明的 @grant 必须在白名单内；用到 request / 反向控制却没声明对应权限会在 App 端被拒，提前拦
