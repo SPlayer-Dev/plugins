@@ -60,8 +60,8 @@ export function validateSource(source) {
     .map((g) => g.trim().toLowerCase())
     .filter(Boolean);
   for (const g of grants) {
-    if (g !== "network" && g !== "control")
-      errors.push(`未知权限 @grant：${g}（仅支持 network / control）`);
+    if (g !== "network" && g !== "control" && g !== "ui")
+      errors.push(`未知权限 @grant：${g}（仅支持 network / control / ui）`);
   }
   if (/\bsplayer\.request\b/.test(source) && !grants.includes("network"))
     errors.push("脚本用到 splayer.request，需声明 @grant network");
