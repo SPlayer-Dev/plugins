@@ -1,7 +1,7 @@
 /**
  * @name        ChKSz 音源
  * @id          chksz.splayer-source
- * @version     0.8.0
+ * @version     0.8.2
  * @description 为 SPlayer-Next 解析网易云 / QQ 音乐 / 酷狗音源：超清母带、Hi-Res、无损，无版权歌曲自动跨平台兜底
  * @author      HSJ-BanFan
  * @homepage    https://github.com/HSJ-BanFan/splayer-chksz-plugin
@@ -9,7 +9,7 @@
  * @grant       network
  * @apiLevel    2
  * @updateUrl   https://raw.githubusercontent.com/HSJ-BanFan/splayer-chksz-plugin/main/dist/chksz.splayer-source.js
- * @changelog   按来源读取平台 ID；上游故障时支持跨平台搜索与解析
+ * @changelog   注册元数据搜索；网易云封面独立于音频解析并复用已有封面
  */
 
 const API_BASE_URL = "https://api.chksz.com";
@@ -37,7 +37,7 @@ const URL_EXPIRY_MARGIN = 30_000;
 // ChKSz 限流为 20 RPM；命中 429 后按 Retry-After 进入冷却，避免把额度继续打空。
 const RATE_LIMIT_COOLDOWN = 60_000;
 const MAX_RATE_LIMIT_COOLDOWN = 15 * 60_000;
-// 502/503/504 是 ChKSz 上游故障（实测酷狗会持续返回并触发服务端熔断），冷却期内不再探测该平台。
+// 搜索与播放解析分别冷却，避免搜索故障封掉仍可用的按 ID 解析。
 const CHANNEL_COOLDOWN = 2 * 60_000;
 // 通道冷却优先按服务端 Retry-After，但不超过这个上限。
 const MAX_CHANNEL_COOLDOWN = 15 * 60_000;
@@ -49,9 +49,13 @@ const SEARCH_KEYWORD_MAX_LENGTH = 60;
 // 此时改用 QQ 音乐公开搜索拿 mid，再交给 ChKSz 解析；公开搜索不消耗 ChKSz 额度。
 const DIRECT_SEARCH_SETTING = "directSearchFallback";
 const DIRECT_SEARCH_ERROR = "CHKSZ_DIRECT_SEARCH_FAILED";
-const QQ_PUBLIC_SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp";
-const DIRECT_SEARCH_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const QQ_PUBLIC_SEARCH_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+const DIRECT_SEARCH_TIMEOUT = 4_000;
+const createSearchId = () => String(
+  BigInt(Math.floor(Math.random() * 20) + 1) * 18014398509481984n +
+  BigInt(Math.floor(Math.random() * 4194305)) * 4294967296n +
+  BigInt(Date.now() % 86400000),
+);
 // 整条音质阶梯都不可用说明是版权问题而非瞬时抖动，短期内同曲直接跳跨平台，省下阶梯请求。
 const TRACK_UNAVAILABLE_TTL = CACHE_TTL;
 // 交付体检：返回地址前只取前几个字节确认真的能拉流（CDN 请求，不消耗 ChKSz 额度）。
@@ -127,8 +131,9 @@ const SOURCE_POLICIES = {
     actions: {
       musicLyric: { endpoint: "/api/163_lyric", params: {} },
       musicPic: {
-        endpoint: "/api/163_music",
-        params: { level: "standard", type: "json" },
+        endpoint: "https://music.163.com/api/song/detail/",
+        request: "songMetadata",
+        params: {},
       },
     },
   },
@@ -159,29 +164,53 @@ const SOURCE_POLICIES = {
     directSearch: {
       name: "QQ 音乐公开搜索",
       endpoint: QQ_PUBLIC_SEARCH_URL,
-      params: (keyword) => ({
-        format: "json",
-        p: 1,
-        n: SEARCH_RESULT_LIMIT,
-        w: keyword,
-        cr: 1,
-        g_tk: 5381,
-        t: 0,
+      cacheVersion: "qq-lite-v1",
+      request: (keyword) => ({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "QQMusic 14090008(android 15)",
+          Referer: "https://y.qq.com",
+          Cookie: "tmeLoginType=-1;",
+        },
+        body: JSON.stringify({
+          comm: {
+            ct: 11, cv: "1003006", v: "1003006", chid: "10003505",
+            os_ver: "15", phonetype: "24122RKC7C", tmeAppID: "qqmusiclight",
+            nettype: "NETWORK_WIFI", udid: "0", OpenUDID: "0", QIMEI36: "0", uin: "0",
+          },
+          request: {
+            module: "music.search.SearchCgiService",
+            method: "DoSearchForQQMusicLite",
+            param: {
+              search_id: createSearchId(), remoteplace: "search.android.keyboard",
+              query: keyword, page_num: 1, num_per_page: SEARCH_RESULT_LIMIT,
+              search_type: 0, highlight: 0, nqc_flag: 0, page_id: 1, grp: 1,
+            },
+          },
+        }),
       }),
-      headers: { Referer: "https://y.qq.com/", "User-Agent": DIRECT_SEARCH_USER_AGENT },
       candidates: (body) => {
-        const list = body?.data?.song?.list;
-        if (!Array.isArray(list)) return [];
-        return list
+        const outer = body?.code;
+        const inner = body?.request?.code;
+        if (outer !== 0 || inner !== 0) {
+          const codeLabel = (value) => typeof value === "number" ? value : "invalid";
+          throw pluginError(DIRECT_SEARCH_ERROR,
+            `QQ 音乐公开搜索业务失败（outer=${codeLabel(outer)}，inner=${codeLabel(inner)}）。`);
+        }
+        const list = body?.request?.data?.body?.item_song;
+        if (!Array.isArray(list)) {
+          throw pluginError(DIRECT_SEARCH_ERROR, "QQ 音乐公开搜索返回的歌曲列表结构无效。");
+        }
+        return list.slice(0, SEARCH_RESULT_LIMIT)
           .map((item) => ({
-            name: textOrEmpty(item?.songname),
+            // title retains Live/Remix markers; the bare name must not bypass version checks.
+            name: textOrEmpty(item?.title),
             singer: (Array.isArray(item?.singer) ? item.singer : [])
-              .map((artist) => textOrEmpty(artist?.name))
-              .filter(Boolean)
-              .join("/"),
-            album: textOrEmpty(item?.albumname),
+              .map((artist) => textOrEmpty(artist?.name)).filter(Boolean).join("/"),
+            album: textOrEmpty(item?.album?.name) || textOrEmpty(item?.album?.title),
             interval: Number(item?.interval) || undefined,
-            mid: textOrEmpty(item?.songmid),
+            mid: textOrEmpty(item?.mid),
           }))
           .filter((item) => item.mid && item.name);
       },
@@ -327,7 +356,7 @@ const createResolutionCore = () => {
         responses: new Map(), metadata: new Map(), actions: new Map(),
         pending: new Map(), actionPending: new Map(),
         channelCooldowns: new Map(), unavailableTracks: new Map(), probes: new Map(),
-        searchFailures: new Map(), searchCooldowns: new Map(),
+        searchFailures: new Map(), searchCooldowns: new Map(), directSearchCooldowns: new Map(),
         rateLimitUntil: 0,
       };
     }
@@ -409,7 +438,7 @@ const createResolutionCore = () => {
   const canDirectSearch = (state, source) =>
     Boolean(getSourcePolicy(source).directSearch) && Boolean(state?.config.directSearchFallback);
 
-  // 平台级冷却：上游 502/503/504；或者 ChKSz 搜索通道故障且没有备用搜索可用。
+  // Playback outages skip the platform; search outages may still use public search.
   const coolingDownPlatform = (state, source) =>
     coolingDownChannel(state, source) ||
     (canDirectSearch(state, source) ? 0 : coolingDown(state.searchCooldowns, source));
@@ -433,6 +462,11 @@ const createResolutionCore = () => {
   const noteSearchOutcome = (state, source, keyword, error) => {
     if (!error) {
       state.searchFailures.delete(source);
+      state.searchCooldowns.delete(source);
+      return;
+    }
+    if (isUpstreamUnavailableError(error)) {
+      state.searchCooldowns.set(source, Date.now() + cooldownMillis(error, CHANNEL_COOLDOWN));
       return;
     }
     if (!isSearchNotFoundError(error)) return;
@@ -1148,21 +1182,37 @@ const createResolutionCore = () => {
   /** 备用搜索：不经过 ChKSz，不扣额度，但仍受整体解析与跨平台时间预算约束。 */
   const performDirectSearch = async (source, keyword, { budget, deadline, state } = {}) => {
     const { directSearch } = getSourcePolicy(source);
-    const cacheKey = requestKey(directSearch.endpoint, { w: keyword });
+    if (state) assertCurrentSession(state);
+    const cacheKey = requestKey(directSearch.cacheVersion, { keyword });
+    const assertSearchDeadline = () => {
+      if (Number.isFinite(deadline) && Date.now() >= deadline) {
+        throw pluginError(RESOLUTION_TIMEOUT_ERROR, "SPlayer 播放地址解析已达到时间上限。");
+      }
+      if (budget && Date.now() >= budget.deadline) {
+        throw pluginError(CROSS_PLATFORM_LIMIT_ERROR, "ChKSz 跨平台兜底已达到请求或时间上限。");
+      }
+    };
+    assertSearchDeadline();
     if (state?.config.smartCache) {
       const cached = readCache(state.responses, cacheKey);
       if (cached?.candidates) return cached.candidates;
     }
 
-    let timeout = REQUEST_TIMEOUT;
+    const cooldown = state ? coolingDown(state.directSearchCooldowns, source) : 0;
+    if (cooldown > 0) {
+      throw pluginError(DIRECT_SEARCH_ERROR, `${directSearch.name}故障冷却中（${cooldown} 秒），未发起请求。`);
+    }
+    let timeout = DIRECT_SEARCH_TIMEOUT;
     let timeoutCode = REQUEST_TIMEOUT_ERROR;
     if (budget) {
       const remaining = budget.deadline - Date.now();
       if (remaining <= 0) {
         throw pluginError(CROSS_PLATFORM_LIMIT_ERROR, "ChKSz 跨平台兜底已达到请求或时间上限。");
       }
-      timeout = Math.min(timeout, remaining);
-      timeoutCode = CROSS_PLATFORM_LIMIT_ERROR;
+      if (remaining <= timeout) {
+        timeout = remaining;
+        timeoutCode = CROSS_PLATFORM_LIMIT_ERROR;
+      }
     }
     if (Number.isFinite(deadline)) {
       const remaining = deadline - Date.now();
@@ -1175,18 +1225,13 @@ const createResolutionCore = () => {
       }
     }
 
-    const url = new URL(directSearch.endpoint);
-    for (const [key, value] of Object.entries(directSearch.params(keyword))) {
-      url.searchParams.set(key, String(value));
-    }
     let response;
     try {
       response = await requestWithTimeout(
-        url.toString(),
+        directSearch.endpoint,
         {
-          method: "GET",
+          ...directSearch.request(keyword),
           responseType: "json",
-          headers: { ...directSearch.headers },
           timeout: Math.max(1, timeout),
         },
         timeoutCode,
@@ -1199,12 +1244,15 @@ const createResolutionCore = () => {
       ) {
         throw error;
       }
+      if (state) assertCurrentSession(state);
+      assertSearchDeadline();
       throw pluginError(
         DIRECT_SEARCH_ERROR,
         `${directSearch.name}请求失败：${redactSensitiveData(error?.message ?? error)}`,
       );
     }
     if (state) assertCurrentSession(state);
+    assertSearchDeadline();
 
     const status = Number(response?.status) || 0;
     if (status < 200 || status >= 300) {
@@ -1226,10 +1274,11 @@ const createResolutionCore = () => {
     return candidates;
   };
 
-  /**
-   * 先走 ChKSz 搜索；它 404/5xx/网络失败或没有结果时，有备用搜索的平台改用备用搜索。
-   * 账号类错误、取消和超时原样抛出；备用搜索也失败时抛回 ChKSz 的原始错误，保持通道诊断语义。
-   */
+  const isSearchTermination = (error) =>
+    isHostCancellationError(error) || isResolutionTimeoutError(error) ||
+    isCrossPlatformLimitError(error) || isAccountError(error);
+
+  /** Search failures retain their provenance and never cool down playback. */
   const searchCandidates = async (source, keyword, requestContext = {}) => {
     const policy = getSourcePolicy(source);
     const { search, directSearch } = policy;
@@ -1238,32 +1287,22 @@ const createResolutionCore = () => {
     const searchCooldown = state ? coolingDown(state.searchCooldowns, source) : 0;
     let providerError;
 
-    if (useDirect && searchCooldown > 0) {
-      splayer.log.warn(
-        `${policy.name}搜索通道故障冷却中（${searchCooldown} 秒），直接改用${directSearch.name}。`,
-      );
+    if (searchCooldown > 0) {
+      providerError = pluginError(CHANNEL_COOLDOWN_ERROR,
+        `${policy.name}搜索通道故障冷却中（${searchCooldown} 秒），未发起请求。`);
+      if (!useDirect) throw providerError;
+      splayer.log.warn(providerError.message);
     } else {
       try {
-        const body = await requestJson(
-          search.endpoint,
-          { ...search.params, [search.keywordParameter]: keyword },
-          requestContext,
-        );
+        const body = await requestJson(search.endpoint,
+          { ...search.params, [search.keywordParameter]: keyword }, requestContext);
         if (state) noteSearchOutcome(state, source, keyword);
         const candidates = extractCandidates(body);
         if (candidates.length || !useDirect) return candidates;
       } catch (error) {
-        if (
-          !useDirect ||
-          isHostCancellationError(error) ||
-          isResolutionTimeoutError(error) ||
-          isCrossPlatformLimitError(error) ||
-          isAccountError(error) ||
-          !(isProviderError(error) || isOperationalError(error))
-        ) {
-          throw error;
-        }
+        if (isSearchTermination(error)) throw error;
         if (state) noteSearchOutcome(state, source, keyword, error);
+        if (!useDirect || !(isProviderError(error) || isOperationalError(error))) throw error;
         providerError = error;
       }
     }
@@ -1275,16 +1314,19 @@ const createResolutionCore = () => {
       );
       return candidates;
     } catch (error) {
-      if (
-        isHostCancellationError(error) ||
-        isResolutionTimeoutError(error) ||
-        isCrossPlatformLimitError(error)
-      ) {
-        throw error;
+      if (isSearchTermination(error)) throw error;
+      if (state) {
+        assertCurrentSession(state);
+        // A skipped request must not continually extend its own cooldown.
+        if (!coolingDown(state.directSearchCooldowns, source)) {
+          state.directSearchCooldowns.set(source, Date.now() + CHANNEL_COOLDOWN);
+        }
       }
-      splayer.log.warn(`${error?.message ?? error}`);
-      if (providerError) throw providerError;
-      return [];
+      const message = redactSensitiveData(error?.message ?? error);
+      splayer.log.warn(message);
+      throw pluginError(providerError && providerError.code !== CHANNEL_COOLDOWN_ERROR
+        ? providerError.code : DIRECT_SEARCH_ERROR,
+        `${providerError?.message ?? `${policy.name}搜索没有结果`}；${message}`);
     }
   };
 
@@ -1326,7 +1368,7 @@ const createResolutionCore = () => {
     const rememberRecoverableError = (error) => {
       if (
         !firstRecoverableError &&
-        (isOperationalError(error) || isProviderError(error))
+        (isOperationalError(error) || isProviderError(error) || error?.code === DIRECT_SEARCH_ERROR)
       ) {
         firstRecoverableError = error;
       }
@@ -1425,7 +1467,6 @@ const createResolutionCore = () => {
         }
         if (isAccountError(error)) throw error;
         rememberRecoverableError(error);
-        noteChannelFailure(state, targetSource, error);
         attempts.push({ name: targetPolicy.name, outcome: "error", error });
         splayer.log.warn(
           `${targetPolicy.name} 匹配《${track.name}》失败：${error?.message ?? error}`,
@@ -1433,7 +1474,7 @@ const createResolutionCore = () => {
       }
     }
 
-    // 一个平台都没能跑完搜索：这是 ChKSz 上游故障，不能报成"没有这首歌"。
+    // 没有平台完成搜索时保留各通道故障，不能报成"没有这首歌"。
     // 但本机网络/超时类错误本身已足够精确，保持原有的 NETWORK_ERROR 语义。
     if (!completedSearch && attempts.length > 0 && !isOperationalError(firstRecoverableError)) {
       const detail = attempts
@@ -1445,7 +1486,7 @@ const createResolutionCore = () => {
         .join("；");
       throw pluginError(
         CROSS_PLATFORM_UNAVAILABLE_ERROR,
-        `${policy.name}无法提供《${track.name}》的播放地址（${primaryError?.message ?? "没有可用音质"}），且跨平台搜索未能完成：${detail}。以上是 ChKSz 服务端的返回状态，不代表歌曲不存在，请稍后重试或更换音源。`,
+        `${policy.name}无法提供《${track.name}》的播放地址（${primaryError?.message ?? "没有可用音质"}），且跨平台搜索未能完成：${detail}。以上是各搜索或解析通道的状态，不代表歌曲不存在，请稍后重试或更换音源。`,
       );
     }
 
@@ -1515,7 +1556,7 @@ const createResolutionCore = () => {
       if (isUpstreamUnavailableError(error)) {
         throw pluginError(
           CROSS_PLATFORM_UNAVAILABLE_ERROR,
-          `${policy.name}无法提供《${descriptor.name}》的播放地址（${error.message}），且在 ${platformNames} 中未匹配到同一首歌。以上是 ChKSz 服务端的返回状态，不代表歌曲不存在，请稍后重试或更换音源。`,
+          `${policy.name}无法提供《${descriptor.name}》的播放地址（${error.message}），且在 ${platformNames} 中未匹配到同一首歌。以上是各搜索或解析通道的状态，不代表歌曲不存在，请稍后重试或更换音源。`,
         );
       }
       throw pluginError(
@@ -1534,6 +1575,55 @@ const createResolutionCore = () => {
     return { ...result };
   };
 
+  const searchMetadata = async ({ source, keyword, page = 1, limit = SEARCH_RESULT_LIMIT }) => {
+    const policy = getSourcePolicy(source);
+    const state = getSession();
+    const query = textOrEmpty(keyword).slice(0, SEARCH_KEYWORD_MAX_LENGTH);
+    if (!state.config.metadataFallback || !query || page !== 1) return { list: [] };
+    const count = Number.isInteger(limit) ? Math.max(1, Math.min(limit, SEARCH_RESULT_LIMIT)) : SEARCH_RESULT_LIMIT;
+    const deadline = Date.now() + CROSS_PLATFORM_TIME_BUDGET;
+    const candidates = await searchCandidates(source, query, {
+      state, deadline, budget: { remaining: 2, deadline },
+    });
+    assertCurrentSession(state);
+    return { list: candidates.slice(0, count).map((candidate) => {
+      const id = textOrEmpty(String(candidate?.[policy.search.candidateIdField] ?? ""));
+      const seconds = parseDurationSeconds(candidate?.interval ?? candidate?.duration);
+      return {
+        id, name: textOrEmpty(candidate?.name), singer: textOrEmpty(candidate?.singer),
+        album: textOrEmpty(candidate?.album),
+        ...(seconds > 0 ? { durationMs: seconds * 1000 } : {}),
+        cover: extractTextField(candidate, ["cover", "coverUrl", "pic", "picUrl", "albumCover"]),
+      };
+    }).filter((candidate) => candidate.id && candidate.name) };
+  };
+
+  const requestSongMetadata = async (id, state) => {
+    if (!/^\d+$/.test(String(id))) return {};
+    const url = new URL(SOURCE_POLICIES.wy.actions.musicPic.endpoint);
+    url.searchParams.set("id", String(id));
+    url.searchParams.set("ids", JSON.stringify([Number(id)]));
+    let response;
+    try {
+      response = await requestWithTimeout(url.toString(), {
+        method: "GET", responseType: "json", timeout: CROSS_PLATFORM_TIME_BUDGET,
+      });
+    } catch (error) {
+      if (isHostCancellationError(error)) throw error;
+      throw pluginError(NETWORK_ERROR, redactSensitiveData(error?.message ?? error));
+    }
+    assertCurrentSession(state);
+    if (response?.status < 200 || response?.status >= 300 || !response?.status) {
+      throw pluginError("CHKSZ_METADATA_FAILED", `网易云歌曲详情返回 HTTP ${Number(response?.status) || 0}。`);
+    }
+    const body = parseLooseJson(response.body);
+    if (body?.code !== 200 || !Array.isArray(body?.songs)) {
+      throw pluginError("CHKSZ_METADATA_FAILED", "网易云歌曲详情响应无效。");
+    }
+    const song = body.songs.find((item) => String(item?.id) === String(id));
+    return { cover: song?.album?.picUrl ?? song?.al?.picUrl ?? "" };
+  };
+
   const requestAction = async (source, action, id) => {
     const state = getSession();
     const { endpoint, params } = buildActionRequest(source, action, id);
@@ -1546,17 +1636,19 @@ const createResolutionCore = () => {
     }
     if (!state.config.metadataFallback) return {};
     return sharePending(state, state.actionPending, key, async () => {
-      const body = await requestJson(endpoint, params, { state, action });
+      const body = source === "wy" && action === "musicPic"
+        ? await requestSongMetadata(id, state)
+        : await requestJson(endpoint, params, { state, action });
       if (state.config.smartCache) writeCache(state.actions, key, body, Date.now() + CACHE_TTL);
       return body;
     });
   };
 
-  return { requestAction, resolve };
+  return { requestAction, searchMetadata, resolve };
 };
 
 const resolutionImplementation = createResolutionCore();
-const { requestAction } = resolutionImplementation;
+const { requestAction, searchMetadata } = resolutionImplementation;
 const resolutionCore = { resolve: resolutionImplementation.resolve };
 
 const resolveUrl = async ({ source, quality, musicInfo }) => {
@@ -1616,6 +1708,10 @@ const getLyric = async ({ source, musicInfo }) => {
 };
 
 const getCover = async ({ source, musicInfo }) => {
+  getSourcePolicy(source);
+  const supplied = [musicInfo?.cover, musicInfo?.picUrl, musicInfo?.album?.picUrl, musicInfo?.album?.cover]
+    .find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+  if (supplied) return { url: supplied };
   const id = getMusicId(source, musicInfo);
   const body = await requestAction(source, "musicPic", id);
 
@@ -1633,10 +1729,11 @@ const createRuntimeAdapter = (runtime) => ({
   register(metadata) {
     runtime.register(metadata);
   },
-  bind({ musicUrl, musicLyric, musicPic }) {
+  bind({ musicUrl, musicLyric, musicPic, musicSearch }) {
     runtime.on("musicUrl", musicUrl);
     runtime.on("musicLyric", musicLyric);
     runtime.on("musicPic", musicPic);
+    runtime.on("musicSearch", musicSearch);
   },
 });
 const runtimeAdapter = createRuntimeAdapter(splayer);
@@ -1646,7 +1743,7 @@ runtimeAdapter.register({
       source,
       {
         name: policy.name,
-        actions: ["musicUrl", "musicLyric", "musicPic"],
+        actions: ["musicUrl", "musicLyric", "musicPic", "musicSearch"],
         qualities: QUALITY_NAMES,
       },
     ]),
@@ -1719,4 +1816,5 @@ runtimeAdapter.bind({
   musicUrl: resolveUrl,
   musicLyric: getLyric,
   musicPic: getCover,
+  musicSearch: searchMetadata,
 });
