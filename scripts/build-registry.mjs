@@ -20,7 +20,6 @@ const plugins = readdirSync(DIR)
       id,
       name: header.name ?? id,
       author: header.author ?? "",
-      type: header.type ?? "source",
       version: header.version ?? "0.0.0",
       description: header.description ?? "",
       homepage: header.homepage ?? "",

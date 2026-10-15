@@ -1,9 +1,9 @@
 # 插件仓库
 
-收录并分发 SPlayer-Next 的插件，支持音源类（`source`）与控制类（`control`）两种插件。
+收录并分发 SPlayer-Next 的插件。单个脚本可组合音源、播放控制、事件订阅、设置和菜单等能力。
 
 > [!IMPORTANT]
-> 编写插件前请完整阅读 **[插件开发文档](https://splayer-next.imsyy.top/plugins/)**。脚本头字段、可用 API、编写规范等均以该文档为准。
+> 编写插件前请完整阅读 **[插件开发文档](https://splayer-next.imsyy.top/plugins/development)**。脚本头字段、可用 API、编写规范等均以该文档为准。
 
 ---
 
@@ -11,7 +11,7 @@
 
 ### 1. 准备插件
 
-按[插件开发文档](https://splayer-next.imsyy.top/plugins/)编写脚本。脚本头需声明 `@id`、`@name`、`@version`、`@type`、`@apiLevel` 等字段，其中 `@id` 全局唯一、上架后不可更改。`@type` 可取 `source`（音源类）或 `control`（控制类）。
+按[插件开发文档](https://splayer-next.imsyy.top/plugins/development)编写脚本。脚本头需声明 `@id`、`@name`、`@version`、`@apiLevel` 等字段，其中 `@id` 全局唯一、上架后不可更改。根据所用接口选择最低 [API 级别](https://splayer-next.imsyy.top/plugins/changelog)，并通过 `@grant` 声明所需权限。
 
 ### 2. 提交
 
