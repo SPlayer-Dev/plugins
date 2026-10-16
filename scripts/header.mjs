@@ -12,13 +12,13 @@ export const LIMITS = {
   description: 256,
   author: 56,
   version: 32,
-  type: 16,
   apiLevel: 8,
   homepage: 256,
   updateUrl: 256,
 };
 
 const ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const GRANTS = ["network", "control", "ui", "library", "api"];
 
 /**
  * 解析脚本头部 JSDoc 的 @字段
@@ -47,29 +47,33 @@ export function validateSource(source) {
   if (!header.id) errors.push("缺少 @id");
   else if (!ID_RE.test(header.id)) errors.push(`@id 非法：${header.id}`);
   if (!header.name) errors.push("缺少 @name");
-  const type = header.type ?? "source";
-  if (type !== "source" && type !== "control")
-    errors.push(`@type 非法：${type}（仅支持 source / control）`);
-  else if (type === "control" && (!header.apiLevel || Number(header.apiLevel) < 2))
-    errors.push("控制类插件需 @apiLevel ≥ 2");
+  if (header.apiLevel && !/^[1-9]\d*$/.test(header.apiLevel)) errors.push("@apiLevel 必须为正整数");
   if (header.version && !/^\d+(\.\d+)*$/.test(header.version))
     errors.push(`@version 非法：${header.version}`);
-  // 权限：声明的 @grant 必须在白名单内；用到 request / 反向控制却没声明对应权限会在 App 端被拒，提前拦
-  const grants = (header.grant ?? "")
-    .split(/[,\s]+/)
-    .map((g) => g.trim().toLowerCase())
-    .filter(Boolean);
+  // 与宿主保持一致：联网权限默认提供，其余权限按声明校验。
+  const grants = [
+    "network",
+    ...(header.grant ?? "")
+      .split(/[,\s]+/)
+      .map((g) => g.trim().toLowerCase())
+      .filter(Boolean),
+  ];
   for (const g of grants) {
-    if (g !== "network" && g !== "control" && g !== "ui")
-      errors.push(`未知权限 @grant：${g}（仅支持 network / control / ui）`);
+    if (!GRANTS.includes(g)) errors.push(`未知权限 @grant：${g}（仅支持 ${GRANTS.join(" / ")}）`);
   }
-  if (/\bsplayer\.request\b/.test(source) && !grants.includes("network"))
-    errors.push("脚本用到 splayer.request，需声明 @grant network");
-  if (
-    /\bsplayer\.player\.(play|pause|next|prev|seek|setVolume|getPosition)\b/.test(source) &&
-    !grants.includes("control")
-  )
-    errors.push("脚本用到 splayer.player.* 反向控制，需声明 @grant control");
+  const requiredGrants = [
+    [
+      "control",
+      /\bsplayer\.player\.(play|pause|next|prev|seek|setVolume|getPosition|playTrack|addToQueue|stop|setPlayMode|getStatus|getNowPlaying)\b/,
+    ],
+    ["library", /\bsplayer\.music\.searchLibrary\b/],
+    ["api", /\bsplayer\.api\.call\b/],
+    ["ui", /\bsplayer\.notify\b/],
+  ];
+  for (const [grant, pattern] of requiredGrants) {
+    if (pattern.test(source) && !grants.includes(grant))
+      errors.push(`脚本用到 ${grant} 权限接口，需声明 @grant ${grant}`);
+  }
   return { id: header.id, header, errors };
 }
 
@@ -80,7 +84,8 @@ export function validateSource(source) {
  */
 export function validate(id, source) {
   const result = validateSource(source);
-  if (result.id && result.id !== id) result.errors.push(`@id（${result.id}）与文件名（${id}）不一致`);
+  if (result.id && result.id !== id)
+    result.errors.push(`@id（${result.id}）与文件名（${id}）不一致`);
   return result;
 }
 

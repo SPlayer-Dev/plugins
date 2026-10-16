@@ -5,23 +5,13 @@ labels: ["投稿"]
 body:
   - type: markdown
     attributes:
-      value: 提交前请阅读插件开发文档 https://splayer-next.imsyy.top/plugins/
+      value: 提交前请阅读插件开发文档 https://splayer-next.imsyy.top/plugins/development
   - type: input
     id: plugin-id
     attributes:
       label: 插件 @id
       description: 与脚本头部 @id 一致，全局唯一，上架后不可更改
       placeholder: 作者.插件名
-    validations:
-      required: true
-  - type: dropdown
-    id: plugin-type
-    attributes:
-      label: 插件 @type
-      description: 与脚本头部 @type 一致
-      options:
-        - source
-        - control
     validations:
       required: true
   - type: textarea
